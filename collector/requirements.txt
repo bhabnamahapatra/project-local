@@ -1,0 +1,24 @@
+﻿# HTTP Requests
+requests>=2.31.0
+
+# Database driver
+psycopg2-binary>=2.9.9
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Data handling
+pandas>=2.1.0
+
+# Date handling
+python-dateutil>=2.8.2
+
+# Logging
+structlog>=23.2.0
+
+# Retries and error handling
+tenacity>=8.2.3
+
+# API clients
+anthropic>=0.3.11  # For Claude API
+openai>=0.28.1    # For OpenAI API

@@ -1,0 +1,18 @@
+﻿# Web framework
+fastapi
+uvicorn
+
+# Database
+psycopg2-binary
+
+# Env loader
+python-dotenv
+
+# Data handling
+pandas
+
+# Validation
+pydantic
+
+# ORM
+sqlalchemy
