@@ -36,12 +36,14 @@ interface ApplicationSelectorProps {
   applications: AIApplication[];
   selectedApp: string | null;
   onSelectionChange: (selectedApp: string) => void;
+  onSubmit: () => void;
 }
 
 const ApplicationSelector: React.FC<ApplicationSelectorProps> = ({
   applications,
   selectedApp,
   onSelectionChange,
+  onSubmit,
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -59,6 +61,11 @@ const ApplicationSelector: React.FC<ApplicationSelectorProps> = ({
         <Button size="small" variant="outlined" onClick={handleSelectNone}>
           Reset
         </Button>
+        {selectedApp && (
+          <Button size="small" variant="contained" onClick={onSubmit}>
+            Submit
+          </Button>
+        )}
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr 1fr' }, gap: 2 }}>

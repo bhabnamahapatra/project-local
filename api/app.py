@@ -1,13 +1,17 @@
 from fastapi import FastAPI, Request, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 import logging
 
 from starlette import status
 
 from metrics import router as metrics_router
-from db import get_dashboard_stats, verify_database_connection
+try:
+    from db import get_dashboard_stats, verify_database_connection
+except ImportError:
+    from db_sqlite import get_dashboard_stats, verify_database_connection
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -129,3 +133,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             "error": "Internal server error"
         }
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

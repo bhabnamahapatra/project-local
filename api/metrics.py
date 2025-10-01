@@ -1,7 +1,26 @@
 from fastapi import APIRouter, Query
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from db import get_connection, format_metrics, get_dashboard_stats
+try:
+    from db import get_connection, format_metrics, get_dashboard_stats
+except ImportError:
+    from db_sqlite import get_dashboard_stats
+    
+    def get_connection():
+        import sqlite3
+        conn = sqlite3.connect('local_dashboard.db')
+        conn.row_factory = sqlite3.Row
+        return conn
+    
+    def format_metrics(metrics):
+        """Format SQLite results to match PostgreSQL format"""
+        formatted = []
+        for row in metrics:
+            if isinstance(row, sqlite3.Row):
+                formatted.append(dict(row))
+            else:
+                formatted.append(row)
+        return formatted
 
 router = APIRouter()
 
@@ -92,17 +111,17 @@ async def get_openai_metrics(
                     'chatgpt' as application_id,
                     id,
                     timestamp,
-                    response_time,
-                    request_count,
-                    error_rate,
-                    success_rate,
-                    average_tokens,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    cost,
-                    uptime,
-                    model
+                    avg_response_time as response_time,
+                    requests_count as request_count,
+                    0 as error_rate,
+                    100 as success_rate,
+                    tokens_used as total_tokens,
+                    0 as prompt_tokens,
+                    0 as completion_tokens,
+                    tokens_used as total_tokens,
+                    cost_usd as cost,
+                    100 as uptime,
+                    model_name as model
                 FROM openai_metrics
                 WHERE 1=1
             """
@@ -119,12 +138,12 @@ async def get_openai_metrics(
             # Add sorting
             if sort_by:
                 column_map = {
-                    'responseTime': 'response_time',
-                    'requestCount': 'request_count',
+                    'responseTime': 'avg_response_time',
+                    'requestCount': 'requests_count',
                     'errorRate': 'error_rate',
                     'successRate': 'success_rate',
-                    'averageTokens': 'average_tokens',
-                    'cost': 'cost',
+                    'averageTokens': 'tokens_used',
+                    'cost': 'cost_usd',
                     'uptime': 'uptime',
                     'timestamp': 'timestamp'
                 }
@@ -156,21 +175,33 @@ async def get_copilot_metrics(
             query = """
                 SELECT 
                     'copilot' as application_id,
-                    timestamp as id,
+                    id,
                     timestamp,
                     0 as response_time,
-                    total_suggestions as request_count,
-                    (100 - (accepted_suggestions::float / NULLIF(total_suggestions, 0) * 100)) as error_rate,
-                    (accepted_suggestions::float / NULLIF(total_suggestions, 0) * 100) as success_rate,
-                    (lines_suggested::float / NULLIF(total_suggestions, 0)) as average_tokens,
-                    total_suggestions,
-                    accepted_suggestions,
-                    total_users,
+                    suggestions_count as request_count,
+                    CASE 
+                        WHEN suggestions_count > 0 
+                        THEN ((suggestions_count - acceptances_count)::float / suggestions_count * 100)
+                        ELSE 0 
+                    END as error_rate,
+                    CASE 
+                        WHEN suggestions_count > 0 
+                        THEN (acceptances_count::float / suggestions_count * 100)
+                        ELSE 0 
+                    END as success_rate,
+                    CASE 
+                        WHEN suggestions_count > 0 
+                        THEN (lines_suggested::float / suggestions_count)
+                        ELSE 0 
+                    END as average_tokens,
+                    suggestions_count as total_suggestions,
+                    acceptances_count as accepted_suggestions,
+                    active_users as total_users,
                     lines_suggested,
                     lines_accepted,
                     100 as uptime,
                     0 as cost,
-                    meta
+                    '' as meta
                 FROM copilot_metrics
                 WHERE 1=1
             """
@@ -186,10 +217,10 @@ async def get_copilot_metrics(
             # Add sorting
             if sort_by:
                 column_map = {
-                    'requestCount': 'total_suggestions',
-                    'successRate': '(accepted_suggestions::float / total_suggestions * 100)',
-                    'errorRate': '(100 - (accepted_suggestions::float / total_suggestions * 100))',
-                    'averageTokens': '(lines_suggested::float / total_suggestions)',
+                    'requestCount': 'suggestions_count',
+                    'successRate': '(acceptances_count::float / suggestions_count * 100)',
+                    'errorRate': '((suggestions_count - acceptances_count)::float / suggestions_count * 100)',
+                    'averageTokens': '(lines_suggested::float / suggestions_count)',
                     'timestamp': 'timestamp'
                 }
                 db_column = column_map.get(sort_by, 'timestamp')

@@ -7,9 +7,9 @@ from typing import Optional, List, Dict, Any
 def get_connection():
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
-        database=os.getenv('DB_NAME', 'metrics_db'),
-        user=os.getenv('DB_USER', 'metrics_user'),
-        password=os.getenv('DB_PASSWORD', 'metrics_pass'),
+        database=os.getenv('DB_NAME', 'ai_dashboard_db'),
+        user=os.getenv('DB_USER', 'ai_dashboard_user'),
+        password=os.getenv('DB_PASSWORD', ''),
         cursor_factory=RealDictCursor
     )
 
@@ -17,7 +17,7 @@ def format_metrics(metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Format metrics for API response"""
     return [{
         'id': str(m.get('id', m.get('timestamp'))),  # Some services use timestamp as ID
-        'applicationId': m['application_id'],
+        'applicationId': m.get('application_id', 'ai-dashboard'),
         'timestamp': m['timestamp'].isoformat() if isinstance(m['timestamp'], datetime) else m['timestamp'],
         'responseTime': float(m.get('response_time', 0)),
         'requestCount': int(m.get('request_count', 0)),
@@ -61,41 +61,22 @@ def get_dashboard_stats() -> Dict[str, Any]:
             cur.execute("""
                 SELECT 
                     COUNT(*) as metric_count,
-                    SUM(request_count) as total_requests,
-                    AVG(response_time) as avg_response_time,
-                    AVG(success_rate) as avg_success_rate,
-                    AVG(error_rate) as avg_error_rate,
-                    SUM(cost) as total_cost,
-                    AVG(uptime) as avg_uptime,
-                    SUM(total_tokens) as total_tokens
+                    SUM(requests_count) as total_requests,
+                    AVG(avg_response_time) as avg_response_time,
+                    AVG(cost_usd) as avg_cost,
+                    SUM(tokens_used) as total_tokens
                 FROM openai_metrics
                 WHERE timestamp >= %s
             """, (last_24h,))
             openai_stats = cur.fetchone()
 
-            # Claude Metrics
-            cur.execute("""
-                SELECT 
-                    COUNT(*) as metric_count,
-                    SUM(request_count) as total_requests,
-                    AVG(response_time) as avg_response_time,
-                    AVG(success_rate) as avg_success_rate,
-                    AVG(error_rate) as avg_error_rate,
-                    SUM(cost) as total_cost,
-                    AVG(uptime) as avg_uptime,
-                    SUM(total_tokens) as total_tokens
-                FROM claude_metrics
-                WHERE timestamp >= %s
-            """, (last_24h,))
-            claude_stats = cur.fetchone()
-
             # Copilot Metrics
             cur.execute("""
                 SELECT 
                     COUNT(*) as metric_count,
-                    SUM(total_suggestions) as total_suggestions,
-                    SUM(accepted_suggestions) as accepted_suggestions,
-                    AVG(total_users) as avg_users,
+                    SUM(suggestions_count) as total_suggestions,
+                    SUM(acceptances_count) as accepted_suggestions,
+                    AVG(active_users) as avg_users,
                     SUM(lines_suggested) as total_lines_suggested,
                     SUM(lines_accepted) as total_lines_accepted
                 FROM copilot_metrics
@@ -103,22 +84,15 @@ def get_dashboard_stats() -> Dict[str, Any]:
             """, (last_24h,))
             copilot_stats = cur.fetchone()
 
-            # Cursor Metrics
+            # System Metrics
             cur.execute("""
                 SELECT 
                     COUNT(*) as metric_count,
-                    SUM(total_interactions) as total_interactions,
-                    SUM(accepted_suggestions) as accepted_suggestions,
-                    AVG(utilization_rate) as avg_utilization,
-                    MAX(total_seats) as total_seats,
-                    AVG(active_users) as avg_active_users,
-                    AVG(monthly_active_users) as avg_mau,
-                    SUM(total_tokens) as total_tokens,
-                    SUM(total_cost) as total_cost
-                FROM cursor_metrics
-                WHERE timestamp >= %s
+                    AVG(metric_value) as avg_cpu_usage
+                FROM system_metrics
+                WHERE metric_name = 'cpu_usage' AND timestamp >= %s
             """, (last_24h,))
-            cursor_stats = cur.fetchone()
+            system_stats = cur.fetchone()
 
             # Helper to safely convert Decimal or None to float
             def safe_float(value):
@@ -135,83 +109,57 @@ def get_dashboard_stats() -> Dict[str, Any]:
             # Combined statistics
             total_requests = (
                 safe_float(openai_stats['total_requests']) +
-                safe_float(claude_stats['total_requests']) +
-                safe_float(copilot_stats['total_suggestions']) +
-                safe_float(cursor_stats['total_interactions'])
+                safe_float(copilot_stats['total_suggestions'])
             )
 
-            total_cost = (
-                safe_float(openai_stats['total_cost']) +
-                safe_float(claude_stats['total_cost']) +
-                safe_float(cursor_stats['total_cost'])
+            total_cost = safe_float(openai_stats['avg_cost']) * safe_int(openai_stats['metric_count'])
+
+            # Calculate success rates
+            openai_success_rate = 95.0  # Default for OpenAI
+            copilot_success_rate = (
+                safe_float(copilot_stats['accepted_suggestions']) / safe_float(copilot_stats['total_suggestions']) * 100
+                if safe_float(copilot_stats['total_suggestions']) > 0 else 0
             )
 
-            # Weighted average response time for LLMs
-            total_llm_requests = (
-                safe_float(openai_stats['total_requests']) +
-                safe_float(claude_stats['total_requests'])
-            )
-            avg_response_time = (
-                (safe_float(openai_stats['avg_response_time']) * safe_float(openai_stats['total_requests']) +
-                 safe_float(claude_stats['avg_response_time']) * safe_float(claude_stats['total_requests']))
-                / (total_llm_requests if total_llm_requests > 0 else 1)
-            )
-
-            # Overall success rate
-            success_rates = []
-            if safe_int(openai_stats['metric_count']):
-                success_rates.append(safe_float(openai_stats['avg_success_rate']))
-            if safe_int(claude_stats['metric_count']):
-                success_rates.append(safe_float(claude_stats['avg_success_rate']))
-            if safe_int(copilot_stats['total_suggestions']):
-                copilot_success = safe_float(copilot_stats['accepted_suggestions']) / safe_float(copilot_stats['total_suggestions']) * 100
-                success_rates.append(copilot_success)
-            if safe_int(cursor_stats['total_interactions']):
-                cursor_success = safe_float(cursor_stats['accepted_suggestions']) / safe_float(cursor_stats['total_interactions']) * 100
-                success_rates.append(cursor_success)
-
-            overall_success_rate = sum(success_rates) / len(success_rates) if success_rates else 0
+            # Overall success rate (weighted average)
+            total_openai_weight = safe_float(openai_stats['total_requests'])
+            total_copilot_weight = safe_float(copilot_stats['total_suggestions'])
+            total_weight = total_openai_weight + total_copilot_weight
+            
+            if total_weight > 0:
+                overall_success_rate = (
+                    (openai_success_rate * total_openai_weight + copilot_success_rate * total_copilot_weight) / total_weight
+                )
+            else:
+                overall_success_rate = 0
 
             return {
                 "success": True,
                 "data": {
                     "totalRequests": safe_int(total_requests),
-                    "averageResponseTime": round(avg_response_time, 2),
+                    "averageResponseTime": round(safe_float(openai_stats['avg_response_time']), 2),
                     "overallSuccessRate": round(overall_success_rate, 2),
                     "totalCost": round(total_cost, 2),
-                    "activeApplications": sum(1 for s in [openai_stats, claude_stats, copilot_stats, cursor_stats]
+                    "activeApplications": sum(1 for s in [openai_stats, copilot_stats, system_stats]
                                               if safe_int(s['metric_count']) > 0),
                     "details": {
                         "openai": {
                             "requests": safe_int(openai_stats['total_requests']),
-                            "successRate": round(safe_float(openai_stats['avg_success_rate']), 2),
-                            "errorRate": round(safe_float(openai_stats['avg_error_rate']), 2),
+                            "successRate": round(openai_success_rate, 2),
+                            "errorRate": round(100 - openai_success_rate, 2),
                             "totalTokens": safe_int(openai_stats['total_tokens']),
-                            "cost": round(safe_float(openai_stats['total_cost']), 2)
-                        },
-                        "claude": {
-                            "requests": safe_int(claude_stats['total_requests']),
-                            "successRate": round(safe_float(claude_stats['avg_success_rate']), 2),
-                            "errorRate": round(safe_float(claude_stats['avg_error_rate']), 2),
-                            "totalTokens": safe_int(claude_stats['total_tokens']),
-                            "cost": round(safe_float(claude_stats['total_cost']), 2)
+                            "cost": round(total_cost, 2)
                         },
                         "copilot": {
                             "suggestions": safe_int(copilot_stats['total_suggestions']),
                             "acceptedSuggestions": safe_int(copilot_stats['accepted_suggestions']),
                             "activeUsers": safe_int(copilot_stats['avg_users']),
                             "linesSuggested": safe_int(copilot_stats['total_lines_suggested']),
-                            "linesAccepted": safe_int(copilot_stats['total_lines_accepted'])
+                            "linesAccepted": safe_int(copilot_stats['total_lines_accepted']),
+                            "successRate": round(copilot_success_rate, 2)
                         },
-                        "cursor": {
-                            "totalSeats": safe_int(cursor_stats['total_seats']),
-                            "activeUsers": safe_int(cursor_stats['avg_active_users']),
-                            "monthlyActiveUsers": safe_int(cursor_stats['avg_mau']),
-                            "interactions": safe_int(cursor_stats['total_interactions']),
-                            "acceptedSuggestions": safe_int(cursor_stats['accepted_suggestions']),
-                            "utilization": round(safe_float(cursor_stats['avg_utilization']), 2),
-                            "totalTokens": safe_int(cursor_stats['total_tokens']),
-                            "cost": round(safe_float(cursor_stats['total_cost']), 2)
+                        "system": {
+                            "cpuUsage": round(safe_float(system_stats['avg_cpu_usage']), 2)
                         }
                     }
                 }
@@ -228,9 +176,8 @@ def get_dashboard_stats() -> Dict[str, Any]:
                 "activeApplications": 0,
                 "details": {
                     "openai": {},
-                    "claude": {},
                     "copilot": {},
-                    "cursor": {}
+                    "system": {}
                 }
             }
         }
@@ -245,8 +192,8 @@ def verify_database_connection() -> Dict[str, Any]:
         with conn.cursor() as cur:
             stats = {}
 
-            # Check each metrics table
-            for table in ['openai_metrics', 'claude_metrics', 'copilot_metrics', 'cursor_metrics']:
+            # Check each table
+            for table in ['system_metrics', 'logs', 'openai_metrics', 'copilot_metrics']:
                 try:
                     cur.execute(f"""
                         SELECT 

@@ -5,15 +5,13 @@ import {
   Card,
   CardContent,
   Typography,
+  Alert,
   AppBar,
   Toolbar,
   IconButton,
   Menu,
   MenuItem,
-  Chip,
-  Alert,
-} from '@mui/material';
-import {
+} from '@mui/material';import {
   AccountCircle,
   Refresh,
   FilterList,
@@ -26,31 +24,29 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 import type { AIApplication, DashboardStats, MetricData, FilterOptions } from '../types';
 import {
-  ApplicationSelector,
+  ApplicationDropdownSelector,
   MetricsTable,
   MetricsChart,
   FilterPanel,
   ThemeToggle,
+  ChatgptMetricsDashboard,
+  CopilotMetricsDashboard,
+  ClaudeMetricsDashboard,
 } from '../components';
 
 const DashboardPage: React.FC = () => {
   const { user, logout } = useAuth();
   const [applications, setApplications] = useState<AIApplication[]>([]);
-  const [selectedApp, setSelectedApp] = useState<string | null>(null);
+  const [selectedApp, setSelectedApp] = useState<string>('');
+  const [submittedApp, setSubmittedApp] = useState<string>('');
   const [metrics, setMetrics] = useState<MetricData[]>([]);
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<FilterOptions>({
-    dateRange: (() => {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 30);
-      return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
-    })(),
-  });
+  const [filters, setFilters] = useState<FilterOptions>({});
   const [showFilters, setShowFilters] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
 
   useEffect(() => {
     loadApplications();
@@ -58,19 +54,17 @@ const DashboardPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (selectedApp) {
+    if (submittedApp) {
       loadMetrics();
     } else {
       setMetrics([]);
     }
-  }, [selectedApp, filters]);
+  }, [submittedApp, filters]);
 
   const loadApplications = async () => {
     const result = await apiService.getApplications();
     if (result.success) {
       setApplications(result.data);
-      // Select the first app by default
-      setSelectedApp(result.data[0]?.id || null);
     }
   };
 
@@ -85,12 +79,14 @@ const DashboardPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      if (!selectedApp) return;
-      const result = await apiService.getMetrics(selectedApp, filters);
-      if (result.success) {
-        setMetrics(result.data);
-      } else {
-        setError(result.error || 'Failed to load metrics');
+      if (submittedApp) {
+        // Load metrics for selected app
+        const result = await apiService.getMetrics(submittedApp, filters);
+        if (result.success) {
+          setMetrics(result.data);
+        } else {
+          setError(result.error || 'Failed to load metrics');
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load metrics');
@@ -138,6 +134,7 @@ const DashboardPage: React.FC = () => {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             AI Metrics Dashboard
           </Typography>
+
           <ThemeToggle />
           <IconButton color="inherit" onClick={handleRefresh}>
             <Refresh />
@@ -164,8 +161,16 @@ const DashboardPage: React.FC = () => {
       </AppBar>
 
       <Container maxWidth="xl" sx={{ mt: 3, mb: 3 }}>
+        {/* Application Dropdown Selector */}
+        <ApplicationDropdownSelector
+          applications={applications}
+          selectedApp={selectedApp}
+          onSelectionChange={setSelectedApp}
+          onSubmit={() => setSubmittedApp(selectedApp)}
+        />
+
         {/* Dashboard Stats */}
-        {dashboardStats && (
+        {dashboardStats && submittedApp && (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr 1fr' }, gap: 3, mb: 3 }}>
             <Box>
               <Card>
@@ -238,22 +243,29 @@ const DashboardPage: React.FC = () => {
           </Box>
         )}
 
-        {/* Application Selector */}
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Select AI Applications
-            </Typography>
-            <ApplicationSelector
-              applications={applications}
-              selectedApp={selectedApp}
-              onSelectionChange={setSelectedApp}
-            />
-          </CardContent>
-        </Card>
+        {/* Admin Metrics Dashboard for ChatGPT */}
+        {submittedApp === 'chatgpt' && (
+          <Box sx={{ mb: 3 }}>
+            <ChatgptMetricsDashboard application="chatgpt" />
+          </Box>
+        )}
+
+        {/* Direct Copilot Metrics Dashboard */}
+        {submittedApp === 'copilot' && (
+          <Box sx={{ mb: 3 }}>
+            <CopilotMetricsDashboard application="copilot" />
+          </Box>
+        )}
+
+        {/* Claude Metrics Dashboard */}
+        {submittedApp === 'claude' && (
+          <Box sx={{ mb: 3 }}>
+            <ClaudeMetricsDashboard application="claude" />
+          </Box>
+        )}
 
         {/* Filter Panel */}
-        {showFilters && (
+        {submittedApp && showFilters && (
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <FilterPanel
@@ -270,37 +282,6 @@ const DashboardPage: React.FC = () => {
           <Alert severity="error" sx={{ mb: 3 }}>
             {error}
           </Alert>
-        )}
-
-        {/* Selected Application Display */}
-        {selectedApp && (
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Showing metrics for:
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {(() => {
-                const app = applications.find(a => a.id === selectedApp);
-                return app ? (
-                  <Chip
-                    icon={
-                      typeof app.icon === 'string' ? (
-                        <span style={{ fontSize: '16px' }}>{app.icon}</span>
-                      ) : (
-                        (() => {
-                          const IconComponent = app.icon;
-                          return <IconComponent width={16} height={16} style={{ color: 'white' }} />;
-                        })()
-                      )
-                    }
-                    label={app.displayName}
-                    size="small"
-                    sx={{ bgcolor: app.color, color: 'white' }}
-                  />
-                ) : null;
-              })()}
-            </Box>
-          </Box>
         )}
 
         {/* Metrics Chart */}
@@ -336,12 +317,13 @@ const DashboardPage: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="body1" color="text.secondary" textAlign="center">
-                Please select at least one AI application to view metrics.
+                Please select an AI application from the dropdown above to view metrics.
               </Typography>
             </CardContent>
           </Card>
         )}
       </Container>
+
     </Box>
   );
 };
