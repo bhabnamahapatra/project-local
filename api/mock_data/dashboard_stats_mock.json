@@ -1,0 +1,43 @@
+{
+  "success": true,
+  "data": {
+    "totalRequests": 7795,
+    "averageResponseTime": 475.6,
+    "overallSuccessRate": 97.4,
+    "totalCost": 21.41,
+    "activeApplications": 4,
+    "details": {
+      "openai": {
+        "requests": 1895,
+        "successRate": 98.3,
+        "errorRate": 1.0,
+        "totalTokens": 1843000,
+        "cost": 8.05
+      },
+      "claude": {
+        "requests": 1700,
+        "successRate": 98.1,
+        "errorRate": 1.0,
+        "totalTokens": 1629000,
+        "cost": 7.01
+      },
+      "copilot": {
+        "suggestions": 2385,
+        "acceptedSuggestions": 2202,
+        "activeUsers": 63,
+        "linesSuggested": 53600,
+        "linesAccepted": 42350
+      },
+      "cursor": {
+        "totalSeats": 80,
+        "activeUsers": 52,
+        "monthlyActiveUsers": 120,
+        "interactions": 1815,
+        "acceptedSuggestions": 1680,
+        "utilization": 78.5,
+        "totalTokens": 1080000,
+        "cost": 6.35
+      }
+    }
+  }
+}
